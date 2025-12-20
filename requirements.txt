@@ -1,0 +1,13 @@
+gradio>=4.44.0
+pillow>=10.0.0
+numpy>=1.24.0
+opencv-python>=4.9.0.80
+torch>=2.1.0
+torchvision>=0.16.0
+diffusers>=0.30.0
+transformers>=4.41.0
+accelerate>=0.33.0
+huggingface_hub>=0.24.0
+safetensors>=0.4.2
+mediapipe>=0.10.14
+tkfontawesome>=1.0.4

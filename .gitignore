@@ -1,0 +1,44 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# ---- Virtual envs ----
+.venv/
+venv/
+ENV/
+env/
+.conda/
+
+# ---- IDEs ----
+.vscode/
+.idea/
+*.iml
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Logs ----
+*.log
+
+# ---- Tkinter / app runtime ----
+*.bak
+*.tmp
+
+# ---- Packaging ----
+*.spec
+
+# ---- Local secrets/config (if any later) ----
+.env
+.env.*
+
+assets/garments/*
+!assets/garments/.gitkeep
