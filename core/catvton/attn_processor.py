@@ -68,5 +68,39 @@ class AttnProcessor2_0(nn.Module):
         return hidden_states
 
 class SkipAttnProcessor(AttnProcessor2_0):
-    """Used by CatVTON to skip cross-attention (no text conditioning)."""
-    pass
+    """
+    CatVTON runs without text conditioning, but UNet cross-attn layers still
+    expect encoder_hidden_states with dim=768. If encoder_hidden_states is None,
+    diffusers will treat it as self-attn and crash (320 vs 768).
+
+    Fix: supply a 'null' encoder_hidden_states of the correct shape/dim so
+    cross-attn executes safely.
+    """
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None,
+                 attention_mask=None, temb=None, **kwargs):
+
+        if encoder_hidden_states is None:
+            # batch size is always first dim (3D or 4D)
+            batch_size = hidden_states.shape[0]
+
+            # typical CLIP seq length
+            seq_len = 77
+
+            # cross-attn expects 768 input features (usually attn.to_k.in_features)
+            cross_dim = attn.to_k.in_features
+
+            encoder_hidden_states = torch.zeros(
+                (batch_size, seq_len, cross_dim),
+                device=hidden_states.device,
+                dtype=hidden_states.dtype,
+            )
+
+        return super().__call__(
+            attn,
+            hidden_states,
+            encoder_hidden_states=encoder_hidden_states,
+            attention_mask=attention_mask,
+            temb=temb,
+            **kwargs
+        )
+

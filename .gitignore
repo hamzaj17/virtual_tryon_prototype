@@ -42,3 +42,5 @@ desktop.ini
 
 assets/garments/*
 !assets/garments/.gitkeep
+
+*.zip

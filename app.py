@@ -5,6 +5,7 @@ from PIL import Image
 from core.config import AppConfig, ModelConfig
 from core.catalog import load_catalog, rebuild_catalog
 from core.tryon_engine import TryOnEngine
+from huggingface_hub import hf_hub_download
 
 app_cfg = AppConfig()
 model_cfg = ModelConfig()

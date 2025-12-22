@@ -89,7 +89,7 @@ class AutoMasker:
         # Smooth & slightly dilate for better inpainting coverage
         k = max(7, (torso_width // 2) | 1)
         mask = cv2.GaussianBlur(mask, (k, k), 0)
-        mask = cv2.dilate(mask, np.ones((7, 7), np.uint8), iterations=1)
+        mask = cv2.dilate(mask, np.ones((9, 9), np.uint8), iterations=2)
 
         # Overlay preview
         overlay = img.copy()

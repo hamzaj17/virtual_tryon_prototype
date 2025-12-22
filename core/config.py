@@ -11,8 +11,8 @@ class ModelConfig:
 @dataclass(frozen=True)
 class AppConfig:
     # CatVTON default resolution
-    width: int = 768
-    height: int = 1024
+    width: int = 384
+    height: int = 512
 
     uploads_dir: str = "data/uploads/people"
     outputs_dir: str = "data/outputs"
