@@ -28,7 +28,8 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-python app.py
+python app.py # for gradio interface
+python tk_app.py # for tkinter interface 
 ```
 
 The UI will open in your browser.
