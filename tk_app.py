@@ -7,6 +7,8 @@ from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageTk, ImageDraw
 
+from backend_bridge import BackendBridge
+
 
 # =========================
 # VISUAL THEME
@@ -36,7 +38,6 @@ GEN_TEXT      = "#0B1418"
 
 DIVIDER_CYAN  = "#1AA7C7"
 
-# Icon path (user requested)
 UPLOAD_ICON_REL = os.path.join("assets", "icons", "add_box_24dp_2854C5_FILL0_wght400_GRAD0_opsz24.png")
 
 
@@ -48,10 +49,6 @@ def clamp(v, lo, hi):
 
 
 def get_font(root, family="Poppins"):
-    """
-    Tkinter can only use fonts installed on the system by family name.
-    Install Poppins system-wide for exact typography.
-    """
     try:
         import tkinter.font as tkfont
         families = set(tkfont.families(root))
@@ -82,9 +79,6 @@ def icon_lightning(size=18, color=GEN_TEXT):
 
 
 def tint_icon_to_cyan(im_rgba, tint_hex=ACCENT_CYAN):
-    """
-    Recolor icon to cyan while preserving alpha. Works for your uploaded icon.
-    """
     r_t, g_t, b_t = Image.new("RGBA", (1, 1), tint_hex).getpixel((0, 0))[:3]
     im = im_rgba.convert("RGBA")
     px = im.load()
@@ -95,6 +89,25 @@ def tint_icon_to_cyan(im_rgba, tint_hex=ACCENT_CYAN):
             if a > 0:
                 px[x, y] = (r_t, g_t, b_t, a)
     return im
+
+
+def center_crop_to_aspect(im, target_w, target_h):
+    """Center-crop image to match target aspect ratio so it fills the stage."""
+    if target_w <= 1 or target_h <= 1:
+        return im
+    im = im.copy()
+    w, h = im.size
+    target_ratio = target_w / target_h
+    img_ratio = w / h
+
+    if img_ratio > target_ratio:
+        new_w = int(h * target_ratio)
+        x1 = (w - new_w) // 2
+        return im.crop((x1, 0, x1 + new_w, h))
+    else:
+        new_h = int(w / target_ratio)
+        y1 = (h - new_h) // 2
+        return im.crop((0, y1, w, y1 + new_h))
 
 
 # =========================
@@ -111,8 +124,8 @@ class NeonButton(tk.Frame):
                  glow=False,
                  glow_color=ACCENT_CYAN_D2,
                  chevron=False,
-                 top_highlight=True,          # ✅ allow removing white line
-                 border=True):                # ✅ allow removing box lines
+                 top_highlight=True,
+                 border=True):
         super().__init__(parent, bg=parent["bg"])
         self.command = command
         self.w, self.h = w, h
@@ -149,7 +162,6 @@ class NeonButton(tk.Frame):
     def _draw(self, fill):
         self.canvas.delete("all")
 
-        # glow behind
         if self.glow:
             rounded_rect(
                 self.canvas,
@@ -160,7 +172,6 @@ class NeonButton(tk.Frame):
                 width=1
             )
 
-        # main shape
         outline = BORDER_DIM if self.border else fill
         width = 1 if self.border else 0
 
@@ -173,11 +184,9 @@ class NeonButton(tk.Frame):
             width=width
         )
 
-        # optional top highlight stripe (remove for Upload box per your request)
         if self.top_highlight:
             self.canvas.create_line(16, 14, self.w - 16, 14, fill="#FFFFFF", width=1)
 
-        # icon + text
         x = self.padx + 6
         if self.icon_img is not None:
             self.canvas.create_image(x + 10, self.h//2, image=self.icon_img)
@@ -186,7 +195,6 @@ class NeonButton(tk.Frame):
         self.canvas.create_text(x + 4, self.h//2, text=self.text, fill=self.fg,
                                 font=self.font, anchor="w")
 
-        # chevron on right
         if self.chevron:
             cx = self.w - 26
             cy = self.h // 2
@@ -339,6 +347,7 @@ def fit_into(im, box):
     nw, nh = max(1, int(w * s)), max(1, int(h * s))
     return im.resize((nw, nh), Image.LANCZOS)
 
+
 def thumb_tile(im_rgba, size=72):
     tile = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(tile)
@@ -351,6 +360,7 @@ def thumb_tile(im_rgba, size=72):
     tile.alpha_composite(content, (x, y))
     return tile
 
+
 def mesh_overlay(im_rgba, color=ACCENT_CYAN):
     im = im_rgba.copy()
     d = ImageDraw.Draw(im)
@@ -362,6 +372,7 @@ def mesh_overlay(im_rgba, color=ACCENT_CYAN):
     for y in range(0, h, step):
         d.line((0, y, w, y), fill=line, width=1)
     return im
+
 
 def composite_tryon(base_rgba, garment_rgba, fit=1.0, x_off=0, y_off=0, opacity=0.85):
     base = base_rgba.copy().convert("RGBA")
@@ -381,15 +392,10 @@ def composite_tryon(base_rgba, garment_rgba, fit=1.0, x_off=0, y_off=0, opacity=
     base.alpha_composite(g, (x, y))
     return base
 
+
 def garment_mask_preview(garment_rgba):
-    """
-    Show the EXACT garment image selected in the catalogue (not a silhouette).
-    - Keeps garment colors
-    - If garment has transparency (PNG), it is composited over black so it looks clean
-    - If garment is JPG/opaque, it shows normally
-    """
     g = garment_rgba.convert("RGBA")
-    bg = Image.new("RGBA", g.size, (0, 0, 0, 255))  # black background for debug tile
+    bg = Image.new("RGBA", g.size, (0, 0, 0, 255))
     bg.alpha_composite(g, (0, 0))
     return bg
 
@@ -410,10 +416,19 @@ class TryOnStudio(tk.Tk):
 
         self.q = queue.Queue()
 
+        # backend
+        self.backend = None
+        try:
+            self.backend = BackendBridge()
+        except Exception as e:
+            print("BackendBridge init failed:", e)
+
         self.subject_img = None
         self.garment_img = None
         self.selected_catalog = 0
         self.result_img = None
+
+        self.backend_debug = None  # (overlay_rgb, mask_rgb, info)
 
         self.fit = 1.00
         self.x_off = 0
@@ -467,7 +482,6 @@ class TryOnStudio(tk.Tk):
         content.grid_columnconfigure(2, weight=2)
         content.grid_rowconfigure(0, weight=1)
 
-        # ✅ Slightly increased horizontal spacing
         self.left = tk.Frame(content, bg=PANEL_BG)
         self.left.grid(row=0, column=0, sticky="nsew", padx=(34, 20), pady=22)
 
@@ -490,10 +504,6 @@ class TryOnStudio(tk.Tk):
     # LEFT PANEL
     # -------------------------
     def _load_upload_icon(self, size=18):
-        """
-        ✅ Uses the user-provided icon file.
-        Falls back gracefully if not found.
-        """
         base_dir = os.path.dirname(os.path.abspath(__file__))
         icon_path = os.path.join(base_dir, UPLOAD_ICON_REL)
         if os.path.exists(icon_path):
@@ -506,7 +516,6 @@ class TryOnStudio(tk.Tk):
     def _build_left_panel(self):
         self._section_label(self.left, "STEP 1: UPLOAD PHOTO")
 
-        # ✅ Enhanced upload box: cyan accent bar + cleaner padding
         upload_shell = tk.Frame(self.left, bg=BORDER_DIM)
         upload_shell.pack(fill="x", pady=(0, 18))
         upload_inner = tk.Frame(upload_shell, bg=CARD_BG)
@@ -529,7 +538,7 @@ class TryOnStudio(tk.Tk):
             fg=TEXT_PRIMARY,
             font=(self.font_family, 11, "bold"),
             icon_pil=upload_icon,
-            top_highlight=False,   # ✅ remove the white line
+            top_highlight=False,
             border=True
         )
         self.btn_upload.pack(anchor="w")
@@ -628,7 +637,7 @@ class TryOnStudio(tk.Tk):
         return wrapper
 
     # -------------------------
-    # BOTTOM BAR (Generate button: remove box lines)
+    # BOTTOM BAR
     # -------------------------
     def _build_bottom_bar(self):
         bar = tk.Frame(self, bg=HEADER_BG, height=84)
@@ -663,18 +672,29 @@ class TryOnStudio(tk.Tk):
             glow=True,
             glow_color=ACCENT_CYAN_D2,
             chevron=True,
-            top_highlight=False,  # ✅ remove internal line
-            border=False          # ✅ remove box/border lines
+            top_highlight=False,
+            border=False
         )
         self.btn_generate.pack()
 
     # -------------------------
-    # CATALOGUE: load from assets/garments
+    # CATALOGUE (backend-connected)
     # -------------------------
     def _load_garments_from_assets(self):
+        if self.backend is not None:
+            try:
+                self.backend.refresh_catalog()
+                items = self.backend.list_catalog_items()
+                self.catalog_items = items  # name/path/image/obj
+                if self.catalog_items:
+                    self._render_catalog_tiles()
+                    return
+            except Exception as e:
+                print("Backend catalog load failed; fallback to local folder scan:", e)
+
+        # fallback local scan (keeps your behavior)
         base_dir = os.path.dirname(os.path.abspath(__file__))
         garments_dir = os.path.join(base_dir, "assets", "garments")
-
         valid_ext = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
         self.catalog_items = []
@@ -699,7 +719,7 @@ class TryOnStudio(tk.Tk):
             try:
                 im = Image.open(path).convert("RGBA")
                 name = os.path.splitext(os.path.basename(path))[0].replace("_", " ").replace("-", " ").title()
-                self.catalog_items.append({"name": name, "path": path, "image": im})
+                self.catalog_items.append({"name": name, "path": path, "image": im, "obj": None})
             except Exception:
                 continue
 
@@ -709,6 +729,12 @@ class TryOnStudio(tk.Tk):
             self._render_stage()
             self._render_debug()
             return
+
+        self._render_catalog_tiles()
+
+    def _render_catalog_tiles(self):
+        for w in self.catalog.inner.winfo_children():
+            w.destroy()
 
         cols = 5
         pad = 10
@@ -776,6 +802,7 @@ class TryOnStudio(tk.Tk):
             return
         self.selected_catalog = idx
         self.garment_img = self.catalog_items[idx]["image"]
+        self.backend_debug = None
 
         for i, (outer, mid) in enumerate(self.tile_borders):
             selected = (i == idx)
@@ -799,6 +826,7 @@ class TryOnStudio(tk.Tk):
             im = Image.open(path).convert("RGBA")
             self.subject_img = im
             self.result_img = None
+            self.backend_debug = None
             self._render_stage()
             self._render_debug()
         except Exception as e:
@@ -847,9 +875,26 @@ class TryOnStudio(tk.Tk):
 
         def worker():
             try:
-                time.sleep(0.55)  # simulate inference
+                # REAL BACKEND
+                if self.backend is not None:
+                    item = self.catalog_items[self.selected_catalog]
+                    g_obj = item.get("obj", None)
+
+                    if g_obj is not None:
+                        steps = 35
+                        guidance = 2.5
+                        out_rgba, overlay_rgb, mask_rgb, info_text = self.backend.run_tryon(
+                            subj, g_obj, steps=steps, guidance=guidance
+                        )
+                        self.q.put(("ok", out_rgba))
+                        self.q.put(("dbg", (overlay_rgb, mask_rgb, info_text)))
+                        return
+
+                # PREVIEW MODE (fast)
+                time.sleep(0.25)
                 result = composite_tryon(subj, garment, fit=fit, x_off=x_off, y_off=0, opacity=opacity)
                 self.q.put(("ok", result))
+
             except Exception as e:
                 self.q.put(("err", str(e)))
 
@@ -859,10 +904,18 @@ class TryOnStudio(tk.Tk):
         try:
             while True:
                 tag, payload = self.q.get_nowait()
+
                 if tag == "ok":
                     self.result_img = payload
                     self._render_stage(final=True)
                     self._render_debug()
+
+                elif tag == "dbg":
+                    overlay_rgb, mask_rgb, info_text = payload
+                    self.backend_debug = (overlay_rgb, mask_rgb, info_text)
+                    print(info_text)
+                    self._render_debug()
+
                 else:
                     messagebox.showerror("Generation Error", payload)
 
@@ -895,8 +948,11 @@ class TryOnStudio(tk.Tk):
         live = composite_tryon(base, self.garment_img, fit=self.fit, x_off=self.x_off, y_off=0, opacity=self.opacity) if self.garment_img else base
         show = self.result_img if (final and self.result_img is not None) else live
 
+        # ✅ Fill stage: crop to stage aspect before resizing
+        show = center_crop_to_aspect(show, cw - 20, ch - 20)
+
         w, h = show.size
-        scale = min((cw - 40) / w, (ch - 40) / h)
+        scale = min((cw - 20) / w, (ch - 20) / h)
         nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
         disp = show.resize((nw, nh), Image.LANCZOS)
 
@@ -912,16 +968,31 @@ class TryOnStudio(tk.Tk):
 
         orig = self.subject_img.copy().convert("RGBA")
 
-        # ✅ mask fixed (works with JPG and PNG)
-        if self.garment_img is not None:
-            mask_rgba = garment_mask_preview(self.garment_img)
+        if self.backend_debug is not None:
+            overlay_rgb, mask_rgb, _info = self.backend_debug
+
+            if mask_rgb is not None:
+                mask_rgba = mask_rgb.convert("RGBA")
+            else:
+                mask_rgba = Image.new("RGBA", orig.size, (0, 0, 0, 255))
+
+            if overlay_rgb is not None:
+                mesh = overlay_rgb.convert("RGBA")
+            else:
+                live = self.result_img.convert("RGBA") if self.result_img is not None else orig
+                mesh = mesh_overlay(live, color=ACCENT_CYAN)
+
+            imgs = [orig, mask_rgba, mesh]
         else:
-            mask_rgba = Image.new("RGBA", orig.size, (0, 0, 0, 255))
+            if self.garment_img is not None:
+                mask_rgba = garment_mask_preview(self.garment_img)
+            else:
+                mask_rgba = Image.new("RGBA", orig.size, (0, 0, 0, 255))
 
-        live = composite_tryon(orig, self.garment_img, fit=self.fit, x_off=self.x_off, y_off=0, opacity=self.opacity) if self.garment_img else orig
-        mesh = mesh_overlay(live, color=ACCENT_CYAN)
+            live = composite_tryon(orig, self.garment_img, fit=self.fit, x_off=self.x_off, y_off=0, opacity=self.opacity) if self.garment_img else orig
+            mesh = mesh_overlay(live, color=ACCENT_CYAN)
+            imgs = [orig, mask_rgba, mesh]
 
-        imgs = [orig, mask_rgba, mesh]
         for tile, im in zip(self.debug_tiles, imgs):
             tile.canvas.delete("all")
             w, h = im.size
